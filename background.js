@@ -18,6 +18,9 @@ const SCOPES = [
 const MAX_TRACKS = 200;
 const CACHE_KEY = "videoIdCache";
 const CACHE_LIMIT = 2000;
+// A track we genuinely could not match is remembered so repeat runs do not pay
+// for the lookup again, but only for a while - YouTube's catalogue changes.
+const MISS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 function getStorage(keys) {
   return new Promise((resolve) => chrome.storage.sync.get(keys, resolve));
@@ -180,6 +183,19 @@ async function searchVideoIdViaApi(query, token) {
   return data.items?.[0]?.id?.videoId || null;
 }
 
+// Cache entries are either a video id string (a hit, kept indefinitely) or
+// { miss: timestamp } (a confirmed no-match, re-checked once the TTL lapses).
+// Anything else - including the bare nulls written by 0.2.0 - is treated as
+// absent, so a track is never permanently poisoned by one bad lookup.
+function cachedVideoId(cache, key) {
+  const entry = cache[key];
+  if (typeof entry === "string" && entry) return entry;
+  if (entry && typeof entry === "object" && Date.now() - entry.miss < MISS_TTL_MS) {
+    return null; // known miss, still fresh: skip the lookup
+  }
+  return undefined; // no usable entry - look it up
+}
+
 async function loadCache() {
   const stored = await getLocal([CACHE_KEY]);
   return stored[CACHE_KEY] || {};
@@ -225,44 +241,55 @@ async function convertPlaylist(message, tabId) {
   let added = 0;
   let missed = 0;
 
-  for (let i = 0; i < limited.length; i++) {
-    const t = limited[i];
-    const query = `${t.title} ${t.artist}`.trim();
-    const key = query.toLowerCase();
-    sendProgress(
-      tabId,
-      Math.round((i / limited.length) * 100),
-      `(${i + 1}/${limited.length}) ${query}`
-    );
+  // Everything resolved so far is worth keeping even if the run dies partway -
+  // a quota failure is exactly when the next attempt most needs the cache.
+  try {
+    for (let i = 0; i < limited.length; i++) {
+      const t = limited[i];
+      const query = `${t.title} ${t.artist}`.trim();
+      const key = query.toLowerCase();
+      sendProgress(
+        tabId,
+        Math.round((i / limited.length) * 100),
+        `(${i + 1}/${limited.length}) ${query}`
+      );
 
-    let videoId = cache[key];
-    if (videoId === undefined) {
-      try {
-        videoId = await scrapeVideoId(query);
-      } catch {
-        videoId = null;
-      }
-      if (!videoId) {
-        // Only spend quota when the free path came up empty.
+      let videoId = cachedVideoId(cache, key);
+      if (videoId === undefined) {
+        // A lookup that threw is a transient failure, not a confirmed no-match,
+        // so it must not be recorded as a miss.
+        let failed = false;
         try {
-          videoId = await searchVideoIdViaApi(query, token);
-        } catch (err) {
-          if (err.quotaExceeded) throw err;
+          videoId = await scrapeVideoId(query);
+        } catch {
           videoId = null;
+          failed = true;
         }
+        if (!videoId) {
+          // Only spend quota when the free path came up empty.
+          try {
+            videoId = await searchVideoIdViaApi(query, token);
+            failed = false;
+          } catch (err) {
+            if (err.quotaExceeded) throw err;
+            videoId = null;
+            failed = true;
+          }
+        }
+        if (videoId) cache[key] = videoId;
+        else if (!failed) cache[key] = { miss: Date.now() };
       }
-      cache[key] = videoId || null;
-    }
 
-    if (videoId) {
-      await addVideoToPlaylist(playlistId, videoId, token);
-      added++;
-    } else {
-      missed++;
+      if (videoId) {
+        await addVideoToPlaylist(playlistId, videoId, token);
+        added++;
+      } else {
+        missed++;
+      }
     }
+  } finally {
+    await saveCache(cache);
   }
-
-  await saveCache(cache);
 
   const summary = missed
     ? `Done - added ${added}, could not match ${missed}.`
@@ -286,6 +313,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     if (message?.type === "CONVERT_PLAYLIST") {
+      // A conversion runs for minutes; the message port will not survive that.
+      // Acknowledge receipt now and report the outcome over tabs.sendMessage.
+      sendResponse({ ok: true, started: true });
       try {
         const result = await convertPlaylist(message, tabId);
         if (tabId) {
@@ -295,7 +325,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             ...result
           }).catch(() => {});
         }
-        sendResponse({ ok: true, ...result });
       } catch (err) {
         const msg = err?.message || String(err);
         if (tabId) {
@@ -305,7 +334,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             error: msg
           }).catch(() => {});
         }
-        sendResponse({ ok: false, error: msg });
       }
       return;
     }

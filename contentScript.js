@@ -226,22 +226,22 @@
 
     let stagnant = 0;
     let lastCount = seen.size;
-    let lastTop = -1;
 
-    // Stop when three consecutive passes add nothing new.
+    // Stop when three consecutive passes add nothing new, or when the scroller
+    // has stopped moving and the last pass found nothing - that is the bottom.
     while (stagnant < 3) {
+      const before = scroller.scrollTop;
       scroller.scrollTop += Math.max(scroller.clientHeight * 0.8, 400);
       await sleep(350);
       collect();
 
-      const atBottom = scroller.scrollTop === lastTop;
-      if (seen.size === lastCount) stagnant++;
-      else stagnant = 0;
+      const grew = seen.size !== lastCount;
+      const moved = scroller.scrollTop !== before;
+      if (grew) stagnant = 0;
+      else if (!moved) stagnant = 3;
+      else stagnant++;
 
       lastCount = seen.size;
-      if (atBottom && seen.size === lastCount) stagnant = 3;
-      lastTop = scroller.scrollTop;
-
       onProgress?.(seen.size);
     }
 
