@@ -1,5 +1,6 @@
 {
   "manifest_version": 3,
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzzHM0rI4P1ZiqKNCq7hU1KLl/6eE1CV0zo49QlyZYuJsCJqOLnylyKb+Oq83ATnc21V504z5K84m4g0wHYvgNaffkrMVgnoX9neRZuyt9MOV3VhW/MwmmRzNaPRs3W9/SZx4Lk1RNeKDIwhTFTT/SsQxPDuCCWxtIH2lf7U1ocBpcn56eWlXmjmXRFcEu4AAoR4s3fK8qwR1136GYPzm3UXP3g9R+yKbW/8z2jFs+/ajxt+gIREwkLYDTJ9OhNRXum0Cd48AzhyGz93QoSDPW/2dTrCJxjjz4le4/zrlZmVFEsiyiMSp7C2zDJYv22uhA9Y5D3h5qlzdOhzpurFtswIDAQAB",
   "name": "Youbefy",
   "description": "Convert your Spotify playlists into YouTube playlists in one click.",
   "version": "0.2.0",
