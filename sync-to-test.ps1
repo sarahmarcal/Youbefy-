@@ -13,6 +13,7 @@ robocopy $src $dst /MIR /XD .git /XF sync-to-test.ps1 /NFL /NDL /NJH /NJS /NP | 
 if ($LASTEXITCODE -lt 8) {
   Write-Host "Synced $src -> $dst"
   Write-Host "Now press Reload on the Youbefy card at chrome://extensions/"
+  exit 0 # robocopy uses 1-7 for success; don't leak them as failures
 } else {
   Write-Host "robocopy failed with code $LASTEXITCODE"
   exit 1

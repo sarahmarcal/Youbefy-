@@ -28,6 +28,7 @@ const MISS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 // Free mode only: pause between network scrapes (not cache hits) so a long
 // playlist does not hammer youtube.com/results and get throttled.
 const SCRAPE_DELAY_MS = 300;
+const SCRAPE_RETRY_MS = 2000;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -168,20 +169,23 @@ async function addVideoToPlaylist(playlistId, videoId, token) {
 // ------------------------------------------------------ video resolution
 
 // Free path: parse a video id out of the youtube.com search results page.
-// Costs no API quota. Returns null if the page shape changes.
+// Costs no API quota. Returns null only for a real results page with no video
+// on it; anything else throws, so callers do not cache a throttle or a consent
+// page as a confirmed no-match. YouTube does throttle bursts: after ~10 quick
+// searches it briefly answered with a redirect loop.
 async function scrapeVideoId(query) {
   const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}&sp=EgIQAQ%253D%253D`;
   const res = await fetch(url, {
     credentials: "omit",
     headers: { "Accept-Language": "en-US,en;q=0.9" }
   });
-  if (!res.ok) return null;
+  if (!res.ok) throw new Error(`youtube results ${res.status}`);
   const html = await res.text();
+  if (!html.includes("ytInitialData")) throw new Error("not a youtube results page");
 
-  // videoRenderer entries are the actual results; a bare "videoId" also shows up
-  // in unrelated player config, so prefer the renderer match.
-  const m = html.match(/"videoRenderer":\{"videoId":"([\w-]{11})"/) ||
-            html.match(/"videoId":"([\w-]{11})"/);
+  // Only videoRenderer entries are results. A bare "videoId" also appears in
+  // unrelated player config, so matching it would pick an arbitrary video.
+  const m = html.match(/"videoRenderer":\{"videoId":"([\w-]{11})"/);
   return m ? m[1] : null;
 }
 
@@ -281,12 +285,20 @@ async function convertPlaylistFree(message, tabId) {
         if (scraped) await sleep(SCRAPE_DELAY_MS);
         scraped = true;
         // Same rule as API mode: a thrown lookup is not a confirmed miss.
+        // A failure is usually YouTube throttling the burst, so back off and
+        // retry once before giving up on the track.
         let failed = false;
-        try {
-          videoId = await scrapeVideoId(query);
-        } catch {
-          videoId = null;
-          failed = true;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          if (attempt) await sleep(SCRAPE_RETRY_MS);
+          try {
+            videoId = await scrapeVideoId(query);
+            failed = false;
+            break;
+          } catch (err) {
+            console.warn("[youbefy] lookup failed:", query, err?.message || err);
+            videoId = null;
+            failed = true;
+          }
         }
         if (videoId) cache[key] = videoId;
         else if (!failed) cache[key] = { miss: Date.now() };

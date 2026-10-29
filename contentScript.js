@@ -157,8 +157,10 @@
     if (el) el.style.display = "none";
   }
 
+  // The first h1 in the document is the sidebar's "Your Library", so look for
+  // the playlist header specifically.
   function getPlaylistName() {
-    const h1 = document.querySelector("h1");
+    const h1 = document.querySelector('[data-testid="entityTitle"], main h1');
     if (h1?.textContent) return h1.textContent.trim();
     const meta = document.querySelector('meta[property="og:title"]');
     if (meta?.getAttribute("content")) return meta.getAttribute("content");
@@ -168,15 +170,12 @@
   // Read whatever rows are currently mounted in the virtualized tracklist.
   function scrapeVisibleRows() {
     const out = [];
-    const rows = document.querySelectorAll('[data-testid="tracklist-row"], [role="row"]');
+    // Only real track rows: a bare [role="row"] also matches the column header,
+    // whose "Title" cell used to be scraped as the first track.
+    const rows = document.querySelectorAll('[data-testid="tracklist-row"]');
     rows.forEach((row) => {
-      let title = "";
-      const titleLink = row.querySelector('a[href^="/track/"]');
-      if (titleLink?.textContent) title = titleLink.textContent.trim();
-      if (!title) {
-        const cell = row.querySelector('[data-testid="internal-track-link"], [aria-colindex="2"]');
-        if (cell?.textContent) title = cell.textContent.trim();
-      }
+      const titleLink = row.querySelector('a[href^="/track/"], [data-testid="internal-track-link"]');
+      const title = titleLink?.textContent?.trim();
       if (!title) return;
 
       const artistLinks = row.querySelectorAll('a[href^="/artist/"]');
@@ -192,18 +191,11 @@
 
   // Spotify's tracklist is virtualized: only ~30 rows exist in the DOM at a time.
   // Find the scroll container so we can walk the whole list.
+  //
+  // Walk up from a row first: the left "Your Library" sidebar is also an
+  // overlayscrollbars viewport and comes first in the DOM, so picking the first
+  // viewport scrolled the sidebar and stopped at ~23 tracks.
   function findScroller() {
-    const candidates = [
-      document.querySelector('[data-overlayscrollbars-viewport]'),
-      document.querySelector(".main-view-container__scroll-node"),
-      document.querySelector('[data-testid="playlist-page"]')
-    ].filter(Boolean);
-
-    for (const el of candidates) {
-      if (el.scrollHeight > el.clientHeight + 50) return el;
-    }
-
-    // Fall back to walking up from a row to the first scrollable ancestor.
     let node = document.querySelector('[data-testid="tracklist-row"]');
     while (node && node !== document.body) {
       const style = getComputedStyle(node);
@@ -211,6 +203,12 @@
         return node;
       }
       node = node.parentElement;
+    }
+
+    for (const el of document.querySelectorAll('[data-overlayscrollbars-viewport], .main-view-container__scroll-node')) {
+      if (el.querySelector('[data-testid="tracklist-row"]') && el.scrollHeight > el.clientHeight + 50) {
+        return el;
+      }
     }
     return document.scrollingElement || document.documentElement;
   }
@@ -220,6 +218,11 @@
   // Scroll through the playlist, collecting rows as they mount.
   async function scrapeAllTracks(onProgress) {
     const seen = new Map(); // key -> {title, artist}, preserves playlist order
+    // findScroller walks up from a row, so give a page that is still loading a
+    // moment to mount one.
+    for (let i = 0; i < 40 &&!document.querySelector('[data-testid="tracklist-row"]'); i++) {
+      await sleep(250);
+    }
     const scroller = findScroller();
 
     const collect = () => {
@@ -235,18 +238,20 @@
     let stagnant = 0;
     let lastCount = seen.size;
 
-    // Stop when three consecutive passes add nothing new, or when the scroller
-    // has stopped moving and the last pass found nothing - that is the bottom.
+    // Stop after three consecutive passes add nothing new. Hitting the bottom is
+    // not the end by itself: Spotify fetches more rows in pages, so a scroller
+    // that stopped moving gets a longer wait for the next page to land. Bailing
+    // there immediately cut a 50-track playlist at 13 on a fresh page load.
+    let moved = true;
     while (stagnant < 3) {
       const before = scroller.scrollTop;
       scroller.scrollTop += Math.max(scroller.clientHeight * 0.8, 400);
-      await sleep(350);
+      await sleep(moved ? 350 : 1000);
       collect();
 
       const grew = seen.size !== lastCount;
-      const moved = scroller.scrollTop !== before;
+      moved = scroller.scrollTop !== before;
       if (grew) stagnant = 0;
-      else if (!moved) stagnant = 3;
       else stagnant++;
 
       lastCount = seen.size;
