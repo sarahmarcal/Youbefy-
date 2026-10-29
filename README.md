@@ -82,6 +82,8 @@ folder. Re-run it after every edit, then press **Reload** on the extension card;
 Chrome reads the copy, not this directory. The pinned key means the mirrored
 copy keeps the same extension ID, so the OAuth registration survives.
 
+
+   ```
 ### OAuth troubleshooting
 
 Two failures cost real time during first setup, both with misleading messages:
@@ -100,12 +102,12 @@ chrome.storage.sync.get(['googleClientId'], (r) => {
   console.log('length:', id.length, '| shape ok:',
     /^\d+-[a-z0-9]+\.apps\.googleusercontent\.com$/.test(id));
 });
-```
+
 
 Note that `redirect_uri_mismatch` and `invalid_client` are different problems:
 the first means the URI is unregistered, the second means the Client ID is wrong.
 A newly created OAuth client can also take a few minutes to propagate.
-
+```
 ### Using it
 
 1. Open a Spotify playlist page in the browser.
@@ -153,7 +155,7 @@ it; when it does, the extension falls back to the paid endpoint automatically
 and you will hit the old limits again.
 
 ---
-
+```
 ## Changelog
 
 ### 0.3.0 — free mode
