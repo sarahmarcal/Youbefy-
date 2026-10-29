@@ -177,8 +177,42 @@ and you will hit the old limits again.
   user gesture left, so `window.open` could be popup-blocked — this affected the
   API-mode playlist tab too.
 
+**Track scraping — found in the first live run in Chrome**
+- `findScroller()` picked the first `[data-overlayscrollbars-viewport]`, which is
+  the left *Your Library* sidebar, so the sidebar scrolled and the playlist did
+  not: a 50-track playlist yielded 23 tracks. It now walks up from a tracklist
+  row first, and only falls back to viewports that contain a row.
+- Rows were matched with `[role="row"]` too, which includes the column header,
+  so a track named "Title" was scraped first. Only
+  `[data-testid="tracklist-row"]` is read now.
+- Reaching the bottom no longer ends the scroll immediately. Spotify loads rows
+  in pages, and on a fresh page load that cut the playlist at 13. The loop now
+  waits longer and stops only after three passes with nothing new. It also waits
+  up to 10 s for the first row to mount.
+- `getPlaylistName()` read the first `h1` in the document — again the sidebar's
+  "Your Library". It now reads `[data-testid="entityTitle"]` / `main h1`.
+- Verified on a 50-track playlist: "Found 50 tracks".
+
+**Video lookup**
+- `scrapeVideoId()` returned `null` on any non-2xx response, which the caller
+  recorded as a confirmed miss — a throttled request was cached as "no video"
+  for 7 days. It now throws unless it received a real results page, and returns
+  `null` only when that page has no `videoRenderer`.
+- Dropped the bare `"videoId"` fallback regex; it matched unrelated player
+  config and could pick an arbitrary video.
+- Free mode retries a failed lookup once after 2 s (YouTube briefly answers
+  bursts of searches with a redirect loop) and logs
+  `[youbefy] lookup failed: <query> <reason>` to the service worker console.
+
+**Tooling**
+- `tests/run.mjs`: zero-dependency Node harness — `node tests/run.mjs`, or
+  `--offline` to skip the live YouTube checks. See `tests/README.md`.
+- `sync-to-test.ps1` exits 0 on robocopy's success codes (1–7) instead of
+  leaking them as a failure.
+
 **Docs**
 - Corrected *Where this stands*: API mode does not need billing.
+- Added `CLAUDE.md` with working notes for AI-assisted sessions.
 
 ### 0.2.1 — cache correctness, scroll termination, pinned ID
 
@@ -260,10 +294,15 @@ and you will hit the old limits again.
 
 ## Where this stands
 
-Fixes through 0.3.0 are **not yet verified against a live conversion** in the
-extension. The two free-mode building blocks — `scrapeVideoId()` and the
-`watch_videos` redirect — were checked by hand against live YouTube on
-2026-10-29.
+First live free-mode run in Chrome (2026-10-29), on a 50-track playlist:
+
+- **Spotify scraping works**: after the fixes above, "Found 50 tracks".
+- **Video lookup is the open problem**: only 12 of 50 tracks matched inside the
+  extension, while the same queries resolve from Node/curl (`tests/run.mjs`
+  matched 12/12 known tracks). The cause is not known yet. Next step: reload
+  the extension, open the **service worker** console, convert a short playlist
+  and read the `[youbefy] lookup failed:` lines. If YouTube is blocking the
+  extension's scrapes, API mode is the free fallback.
 
 API-mode setup reached the Google consent screen successfully — the extension
 loads, the manifest key holds the ID, the redirect URI is accepted and the
@@ -283,9 +322,9 @@ To pick it up from here:
    the daily budget before revealing a bug.
 5. Keep the **service worker** console open; auth and quota errors surface there.
 
-The scroll-loop fix is the one most worth watching on a real playlist: that path
-was terminating early, so confirm the "found N" count matches the playlist's
-actual length before the conversion starts.
+Keep confirming that the "Found N tracks" count matches the playlist's actual
+length before the conversion starts — Spotify's DOM changes and that path has
+broken three different ways already.
 
 ## Known gaps / not yet done
 
@@ -301,4 +340,8 @@ actual length before the conversion starts.
   filled YouTube playlist is left behind and a re-run creates a second one. The
   video-ID cache means the re-run is cheap, but the duplicate playlist is manual
   cleanup.
-- **No tests** and no build step.
+- **Tests cover `background.js` only.** `tests/run.mjs` exercises the cache,
+  URL building and free-mode flow; the Spotify scraping in `contentScript.js`
+  and the OAuth/API path still need a manual run in Chrome. No build step.
+- **Cache eviction is FIFO, not LRU** — a hit is never moved to the back, so
+  often-used entries are evicted first.
