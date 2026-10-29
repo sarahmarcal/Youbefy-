@@ -3,14 +3,44 @@
 Chrome extension (Manifest V3) that converts a Spotify playlist into a YouTube
 playlist. It adds a floating **Convert to YouTube** button to any
 `open.spotify.com/playlist/*` page, reads the tracklist, finds a matching video
-for each track, and builds the playlist on your YouTube account.
+for each track, and builds a YouTube playlist from them — either a temporary one
+with no setup at all (**free mode**, the default) or a real playlist on your
+YouTube account (**API mode**).
 
 ---
 
 ## Setup
 
-You need your own Google OAuth client — the extension has no server and no
-bundled credentials.
+### Free mode (no Google Cloud)
+
+Needs zero setup: no Google account, no Cloud project, no OAuth client, no API
+quota. It is the default; nothing has to be entered in the options page.
+
+Videos are found by scraping `youtube.com/results`, and the matches are handed
+to YouTube's own `watch_videos?video_ids=…` endpoint, which redirects to an
+anonymous playlist (`list=TLGG…`). What you get:
+
+- A playlist that plays in order on a normal watch page, with loop and shuffle.
+- **It is temporary.** The list ID encodes the date it was made, it is titled
+  "Untitled List", and it is not saved anywhere on your account. Signed out,
+  YouTube shows no option to save the list as a whole — only **Save to playlist**
+  on individual videos. To keep it, save the videos you want one by one, or use
+  API mode.
+- **At most 50 videos per list.** Anything past the 50th id is silently dropped
+  by YouTube (measured, see `buildWatchVideosUrls` in `background.js`), so longer
+  playlists open as several tabs, one per 50 tracks.
+
+Limits: no playlist name or privacy setting, and it depends on YouTube's HTML and
+the undocumented `watch_videos` endpoint — either could change without notice.
+Lookups pause ~300 ms between searches to avoid being throttled, so a 200-track
+playlist takes a minute or two.
+
+### API mode (your own Google OAuth client)
+
+Pick **YouTube account** under *Mode* in the options page. You need your own
+Google OAuth client — the extension has no server and no bundled credentials.
+Neither the YouTube Data API nor an OAuth client in *Testing* requires a billing
+account or free-trial activation in Google Cloud.
 
 1. **Google Cloud Console** → create (or pick) a project.
 2. **APIs & Services → Library** → enable **YouTube Data API v3**.
@@ -79,14 +109,18 @@ A newly created OAuth client can also take a few minutes to propagate.
 ### Using it
 
 1. Open a Spotify playlist page in the browser.
-2. Click **Sign in with Google** if it appears (only needed once per token).
+2. API mode only: click **Sign in with Google** if it appears (only needed once
+   per token). Free mode never shows it.
 3. Click **Convert to YouTube**. It scrolls the playlist to load every track,
    then reports progress in the bottom-right panel.
-4. When it finishes, the new YouTube playlist opens in a new tab.
+4. When it finishes, the playlist opens in a new tab (free mode: one tab per 50
+   tracks, the first one focused).
 
 ---
 
 ## API quota — read this
+
+This section applies to API mode only; free mode uses no API quota.
 
 The YouTube Data API gives a project **10,000 quota units per day** by default.
 The costs that matter:
@@ -121,6 +155,30 @@ and you will hit the old limits again.
 ---
 
 ## Changelog
+
+### 0.3.0 — free mode
+
+**Free mode (new default)**
+- New `mode` setting (`chrome.storage.sync`): `"free"` or `"api"`, unset means
+  free. Selectable in the options page; the Client ID and privacy fields are
+  dimmed while free mode is selected.
+- Free mode resolves tracks with the cache and `scrapeVideoId()` only — no
+  sign-in, no `playlists.insert`, no `search.list` fallback — and builds
+  temporary playlists via `watch_videos?video_ids=…`, 50 ids per URL.
+- Network scrapes are spaced ~300 ms apart; cache hits are not delayed. Cache
+  semantics are unchanged (hits kept, misses expire after 7 days, a thrown lookup
+  is not a miss, cache saved in `finally`).
+- The content script skips the silent sign-in and keeps the sign-in button
+  hidden in free mode, and follows mode changes without a page reload.
+
+**Both modes**
+- The result is opened by the background with `chrome.tabs.create` instead of
+  `window.open` in the content script. After minutes of async work there is no
+  user gesture left, so `window.open` could be popup-blocked — this affected the
+  API-mode playlist tab too.
+
+**Docs**
+- Corrected *Where this stands*: API mode does not need billing.
 
 ### 0.2.1 — cache correctness, scroll termination, pinned ID
 
@@ -202,21 +260,28 @@ and you will hit the old limits again.
 
 ## Where this stands
 
-Fixes through 0.2.1 are committed but **not yet verified against a live
-conversion**. Setup reached the Google consent screen successfully — the
-extension loads, the manifest key holds the ID, the redirect URI is accepted and
-the Client ID is correct — but end-to-end testing is paused waiting on billing to
-clear in Google Cloud.
+Fixes through 0.3.0 are **not yet verified against a live conversion** in the
+extension. The two free-mode building blocks — `scrapeVideoId()` and the
+`watch_videos` redirect — were checked by hand against live YouTube on
+2026-10-29.
+
+API-mode setup reached the Google consent screen successfully — the extension
+loads, the manifest key holds the ID, the redirect URI is accepted and the
+Client ID is correct. Testing was then paused "waiting on billing", but that was
+not actually a blocker: billing / free-trial activation is not needed for the
+YouTube Data API, and the default 10,000 units/day quota is free.
 
 To pick it up from here:
 
 1. Run `sync-to-test.ps1`, press **Reload** on the extension card.
-2. Open a Spotify playlist and click **Sign in with Google**, then
-   **Convert to YouTube**.
-3. Start with a **short playlist (5-10 tracks)** — each track costs 50 quota
-   units to insert, so a first run on a large playlist can burn the daily budget
-   before revealing a bug.
-4. Keep the **service worker** console open; auth and quota errors surface there.
+2. Free mode first: open a Spotify playlist and click **Convert to YouTube**.
+   Then try a playlist over 50 tracks and check it opens one tab per 50.
+3. API mode: switch *Mode* in the options page, click **Sign in with Google**,
+   then **Convert to YouTube**.
+4. In API mode, start with a **short playlist (5-10 tracks)** — each track
+   costs 50 quota units to insert, so a first run on a large playlist can burn
+   the daily budget before revealing a bug.
+5. Keep the **service worker** console open; auth and quota errors surface there.
 
 The scroll-loop fix is the one most worth watching on a real playlist: that path
 was terminating early, so confirm the "found N" count matches the playlist's

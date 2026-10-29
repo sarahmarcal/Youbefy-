@@ -6,6 +6,8 @@
 
   let isLoggedIn = false;
   let busy = false;
+  // Free mode never touches Google sign-in; only "api" mode needs it.
+  let mode = "free";
 
   function createStyles() {
     const style = document.createElement("style");
@@ -104,9 +106,15 @@
         isLoggedIn = true;
         setSignInVisible(false);
       } else {
-        setSignInVisible(true);
+        setSignInVisible(mode === "api"); // mode may have flipped meanwhile
       }
     });
+  }
+
+  function applyMode(value, delay) {
+    mode = value === "api" ? "api" : "free";
+    if (mode === "api") setTimeout(tryAutoLogin, delay);
+    else setSignInVisible(false);
   }
 
   function ensureOverlay() {
@@ -289,10 +297,9 @@
     if (msg?.type === "CONVERSION_DONE") {
       setBusy(false);
       if (msg.success) {
-        updateOverlay(100, `${msg.summary || "Completed!"} Opening YouTube...`);
-        if (msg.playlistId) {
-          window.open(`https://www.youtube.com/playlist?list=${msg.playlistId}`, "_blank");
-        }
+        // The background opens the tab(s); see openResult() there.
+        const opening = msg.playlistId || msg.urls?.length;
+        updateOverlay(100, `${msg.summary || "Completed!"}${opening ? " Opening YouTube..." : ""}`);
       } else {
         updateOverlay(0, `Failed: ${msg.error || "Unknown error"}`);
       }
@@ -305,5 +312,9 @@
   ensureOverlay();
   ensureButton();
   ensureSignInButton();
-  setTimeout(tryAutoLogin, 1000);
+  chrome.storage.sync.get(["mode"], (r) => applyMode(r?.mode, 1000));
+  // Switching mode in the options page takes effect without a reload.
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === "sync" && changes.mode) applyMode(changes.mode.newValue, 0);
+  });
 })();

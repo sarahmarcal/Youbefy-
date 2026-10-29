@@ -1,6 +1,10 @@
 // Background service worker for Youbefy
-// Obtains a Google access token via chrome.identity.launchWebAuthFlow and uses
-// the YouTube Data API to create a playlist and fill it with matching videos.
+// Two modes, picked in the options page (storage key `mode`):
+// - "free" (default): resolve videos by scraping and hand them to YouTube's
+//   watch_videos endpoint, which builds an anonymous temporary playlist. No
+//   Google account, no OAuth client, no API quota.
+// - "api": obtain a Google access token via chrome.identity.launchWebAuthFlow
+//   and use the YouTube Data API to create a real playlist on the account.
 //
 // Quota note: search.list costs 100 units/call against a 10,000 unit/day default
 // quota, which caps you at ~100 lookups per day. To avoid that we resolve videos
@@ -21,6 +25,11 @@ const CACHE_LIMIT = 2000;
 // A track we genuinely could not match is remembered so repeat runs do not pay
 // for the lookup again, but only for a while - YouTube's catalogue changes.
 const MISS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+// Free mode only: pause between network scrapes (not cache hits) so a long
+// playlist does not hammer youtube.com/results and get throttled.
+const SCRAPE_DELAY_MS = 300;
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function getStorage(keys) {
   return new Promise((resolve) => chrome.storage.sync.get(keys, resolve));
@@ -212,6 +221,25 @@ async function saveCache(cache) {
   await setLocal({ [CACHE_KEY]: cache });
 }
 
+// ------------------------------------------------------------ free mode
+
+// Returns an array of watch_videos URLs, one per chunk of at most `chunkSize` ids.
+// Drops falsy ids and duplicates (first occurrence wins, order preserved).
+//
+// 50 is YouTube's real per-URL limit, measured 2026-10-29 with 119 distinct ids:
+// 49 and 50 ids redirect to different TLGG lists, but 50, 51, 75, 100 and 119
+// all redirect to the *same* list, whose watch page reports totalVideos: 50 and
+// contains none of ids 51+. Extra ids are dropped silently, not rejected.
+function buildWatchVideosUrls(videoIds, chunkSize = 50) {
+  const size = chunkSize >= 1 ? Math.floor(chunkSize) : 50; // never loop on 0/NaN
+  const unique = [...new Set((videoIds || []).filter(Boolean))];
+  const urls = [];
+  for (let i = 0; i < unique.length; i += size) {
+    urls.push(`https://www.youtube.com/watch_videos?video_ids=${unique.slice(i, i + size).join(",")}`);
+  }
+  return urls;
+}
+
 // ------------------------------------------------------------ messaging
 
 function sendProgress(tabId, progress, message) {
@@ -219,7 +247,72 @@ function sendProgress(tabId, progress, message) {
   chrome.tabs.sendMessage(tabId, { type: "CONVERSION_PROGRESS", progress, message }).catch(() => {});
 }
 
+// Unset counts as free: a fresh install should work with zero setup.
 async function convertPlaylist(message, tabId) {
+  const { mode } = await getStorage(["mode"]);
+  return mode === "api"
+    ? convertPlaylistViaApi(message, tabId)
+    : convertPlaylistFree(message, tabId);
+}
+
+// No token here, so no API fallback: a track the scrape cannot find is a miss.
+async function convertPlaylistFree(message, tabId) {
+  const limited = (message.tracks || []).slice(0, MAX_TRACKS);
+  if (!limited.length) throw new Error("No tracks were provided.");
+
+  const cache = await loadCache();
+  const videoIds = [];
+  let missed = 0;
+  let scraped = false;
+
+  try {
+    for (let i = 0; i < limited.length; i++) {
+      const t = limited[i];
+      const query = `${t.title} ${t.artist}`.trim();
+      const key = query.toLowerCase();
+      sendProgress(
+        tabId,
+        Math.round((i / limited.length) * 100),
+        `(${i + 1}/${limited.length}) ${query}`
+      );
+
+      let videoId = cachedVideoId(cache, key);
+      if (videoId === undefined) {
+        if (scraped) await sleep(SCRAPE_DELAY_MS);
+        scraped = true;
+        // Same rule as API mode: a thrown lookup is not a confirmed miss.
+        let failed = false;
+        try {
+          videoId = await scrapeVideoId(query);
+        } catch {
+          videoId = null;
+          failed = true;
+        }
+        if (videoId) cache[key] = videoId;
+        else if (!failed) cache[key] = { miss: Date.now() };
+      }
+
+      if (videoId) videoIds.push(videoId);
+      else missed++;
+    }
+  } finally {
+    await saveCache(cache);
+  }
+
+  const urls = buildWatchVideosUrls(videoIds);
+  // Two tracks can resolve to the same video; watch_videos lists it once, so
+  // count what actually lands in the playlist.
+  const added = new Set(videoIds).size;
+  const parts = urls.length > 1 ? `, split into ${urls.length} parts (YouTube allows 50 per list)` : "";
+  const misses = missed ? ` Could not match ${missed}.` : "";
+  const summary = added
+    ? `Done - ${added} videos in a temporary YouTube playlist${parts}.${misses}`
+    : `Done - could not match any of ${limited.length} tracks.`;
+  sendProgress(tabId, 100, summary);
+  return { urls, added, missed, summary };
+}
+
+async function convertPlaylistViaApi(message, tabId) {
   const { playlistName, tracks } = message;
   const limited = (tracks || []).slice(0, MAX_TRACKS);
   if (!limited.length) throw new Error("No tracks were provided.");
@@ -298,6 +391,17 @@ async function convertPlaylist(message, tabId) {
   return { playlistId, added, missed, summary };
 }
 
+// Opened from here rather than via window.open in the content script: by the
+// time a conversion finishes there is no user gesture left, so the page's
+// popup blocker would eat it. Only the first tab takes focus.
+function openResult(result) {
+  const urls = result.urls ||
+    (result.playlistId ? [`https://www.youtube.com/playlist?list=${result.playlistId}`] : []);
+  urls.forEach((url, i) => {
+    chrome.tabs.create({ url, active: i === 0 }).catch(() => {});
+  });
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
     const tabId = sender?.tab?.id;
@@ -318,6 +422,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ ok: true, started: true });
       try {
         const result = await convertPlaylist(message, tabId);
+        openResult(result);
         if (tabId) {
           chrome.tabs.sendMessage(tabId, {
             type: "CONVERSION_DONE",
