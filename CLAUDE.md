@@ -13,6 +13,8 @@ README stay in English.
 - `contentScript.js` — runs on `open.spotify.com/playlist/*`: injects the
   buttons/overlay, scrolls the virtualized tracklist, sends `CONVERT_PLAYLIST`.
 - `options.html` / `options.js` — mode, OAuth Client ID, playlist privacy.
+- `site/index.html` — marketing/landing page (download, modes, pricing, FAQ). Standalone, no build; loads `../icons/`, so open it from `site/`.
+  Its `:root` CSS variables mirror the Figma tokens — keep the names in sync.
 - `tests/run.mjs` — zero-dependency harness. `node tests/run.mjs` (live, hits
   youtube.com) or `--offline`. Run `--offline` after every background.js change.
 
@@ -74,6 +76,44 @@ In Chrome, free mode matched only 12/50 tracks while the same queries resolve
 fine from Node/curl. Cause not yet known — waiting on the service-worker
 console output. If YouTube is blocking the extension's scrapes, api mode
 (free quota) is the fallback.
+
+## Design (Figma)
+
+File "Youbefy — Screens & Design System":
+`figma.com/design/DDOa44YiV0MANoyn4tswJ4`. Pages:
+
+- **Design System** — variable collection "Youbefy Tokens" (`color/*`,
+  `radius/*`, `space/*`), text styles, `Shadow/Floating` / `Shadow/Overlay`,
+  `Gradient/Brand 135°` (buttons) and `90°` (progress). Components: Button
+  (Primary/Secondary), Progress Overlay, Progress Bar, Save Button, Input,
+  Select, Code Chip, Form Field, Tag, Card. Values come from the CSS in
+  `contentScript.js` / `options.html`; change both sides together.
+- **Screens** — 01–07 Spotify page states (idle, sign-in, loading, searching,
+  done free/api, error), 08–10 options page (free, api, Saved!).
+- **Landing Page** — mirrors `site/index.html`. Unfinished: only nav + hero
+  are built; a broken partial "How it works" section may be left from a failed
+  call, so remove it first.
+
+The user's Figma plan is Starter: the MCP call limit is low and was hit
+mid-build. Batch as much as possible per `use_figma` call.
+
+Known UI bug shown in screens 03–07: the overlay panel (`inset: 16px`,
+bottom-right) sits under the Convert button (`bottom/right: 24px`, higher
+z-index), hiding the end of the message. Not fixed yet.
+
+## Site & business model
+
+- `main`'s site must describe only what the extension does today: free,
+  unlimited conversions, plus an optional one-time $4.99 **Supporter** tip
+  (placeholder price). All checkout/download links are `#` placeholders.
+- A planned per-playlist model (Free 1/day, Unlimited $4.99, "buy me a coffee"
+  $1 = +1 bonus playlist) lives on the local branch `landing-page`. Keep it off
+  `main` until the extension enforces it — that needs a backend
+  (accounts/licenses + payments) plus a check in `background.js`; a local-only
+  counter would be trivially bypassed.
+- Don't use `asset/magnific_*.png` on the site — it shows a Nike logo
+  (implied endorsement). The footer carries a "not affiliated with Spotify or
+  YouTube" notice; keep it.
 
 ## Known gaps
 

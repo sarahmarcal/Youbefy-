@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Youbefy — Spotify playlists to YouTube in one click</title>
+    <meta name="description" content="Chrome extension that converts a Spotify playlist into a YouTube playlist in one click." />
+    <link rel="icon" href="../icons/icon-48.png" />
+    <style>
+      /* Tokens mirror the "Youbefy Tokens" collection in the Figma design system. */
+      :root {
+        --brand-green: #22c55e;
+        --brand-red: #ef4444;
+        --grad-135: linear-gradient(135deg, var(--brand-green), var(--brand-red));
+        --grad-90: linear-gradient(90deg, var(--brand-green), var(--brand-red));
+        --bg-page: #0b1020;
+        --bg-surface: rgba(255,255,255,0.05);
+        --bg-field: rgba(255,255,255,0.06);
+        --bg-overlay: rgba(17,17,17,0.92);
+        --bg-button-secondary: #1a1a1a;
+        --bg-code: rgba(255,255,255,0.08);
+        --bg-track: rgba(255,255,255,0.2);
+        --border-subtle: rgba(255,255,255,0.08);
+        --border-field: rgba(255,255,255,0.15);
+        --border-strong: rgba(255,255,255,0.2);
+        --text-primary: #e7e7ec;
+        --text-inverse: #fff;
+        --text-muted: rgba(231,231,236,0.8);
+        --radius-sm: 6px; --radius-md: 10px; --radius-lg: 12px; --radius-xl: 16px; --radius-pill: 9999px;
+        --shadow-floating: 0 10px 30px rgba(0,0,0,.25);
+        --shadow-overlay: 0 8px 24px rgba(0,0,0,.4);
+        --font: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; font-family: var(--font); font-size: 14px; line-height: 20px; background: var(--bg-page); color: var(--text-primary); }
+      a { color: inherit; }
+      .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+      .muted { color: var(--text-muted); }
+      code { background: var(--bg-code); padding: 2px 6px; border-radius: var(--radius-sm); font-size: 12px; }
+
+      .btn { display: inline-flex; align-items: center; gap: 8px; padding: 12px 16px; border-radius: var(--radius-pill); font-weight: 600; font-size: 14px; text-decoration: none; color: var(--text-inverse); border: none; box-shadow: var(--shadow-floating); cursor: pointer; transition: filter .15s, transform .15s; }
+      .btn:hover { filter: brightness(1.1); transform: translateY(-1px); }
+      .btn-primary { background: var(--grad-135); }
+      .btn-secondary { background: var(--bg-button-secondary); border: 1px solid var(--border-strong); }
+
+      .card { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-xl); padding: 20px; box-shadow: var(--shadow-floating); }
+
+      nav { display: flex; align-items: center; justify-content: space-between; padding: 20px 0; }
+      .logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 20px; text-decoration: none; }
+      .logo img { width: 32px; height: 32px; border-radius: 8px; }
+      nav .links { display: flex; gap: 24px; align-items: center; }
+      nav .links a:not(.btn) { text-decoration: none; color: var(--text-muted); }
+
+      .hero { display: grid; grid-template-columns: 1.1fr 1fr; gap: 48px; align-items: center; padding: 64px 0 80px; }
+      .hero h1 { font-size: 52px; line-height: 60px; margin: 0 0 16px; font-weight: 700; color: var(--text-inverse); }
+      .hero h1 span { background: var(--grad-90); -webkit-background-clip: text; background-clip: text; color: transparent; }
+      .hero p { font-size: 18px; line-height: 28px; margin: 0 0 28px; }
+      .cta { display: flex; gap: 12px; flex-wrap: wrap; }
+      .note { margin-top: 16px; font-size: 12px; line-height: 18px; }
+
+      /* Preview of the injected UI, built from the same components. */
+      .preview { position: relative; height: 340px; border-radius: var(--radius-xl); background: #121212; border: 1px solid var(--border-subtle); overflow: hidden; box-shadow: var(--shadow-overlay); }
+      .preview .head { height: 120px; background: linear-gradient(180deg, #4d73a6, #1a2640); padding: 20px; display: flex; gap: 16px; align-items: flex-end; }
+      .preview .cover { width: 80px; height: 80px; border-radius: 4px; background: linear-gradient(135deg, #33cc80, #1a4d99); }
+      .preview .title { font-size: 28px; line-height: 32px; font-weight: 700; color: #fff; }
+      .preview .row { display: flex; gap: 12px; align-items: center; padding: 8px 20px; color: #b3b3b3; }
+      .preview .row i { width: 28px; height: 28px; border-radius: 4px; background: #333; }
+      .preview .row b { color: #fff; font-weight: 400; display: block; }
+      .overlay { position: absolute; left: 16px; bottom: 16px; width: 300px; padding: 12px 16px; border-radius: var(--radius-lg); background: var(--bg-overlay); color: #fff; box-shadow: var(--shadow-overlay); }
+      .bar { height: 6px; background: var(--bg-track); border-radius: var(--radius-pill); overflow: hidden; margin-top: 8px; }
+      .bar span { display: block; height: 100%; width: 62%; background: var(--grad-90); }
+      .preview .btn { position: absolute; right: 16px; bottom: 16px; }
+
+      section { padding: 64px 0; }
+      h2 { font-size: 32px; line-height: 40px; margin: 0 0 8px; color: var(--text-inverse); }
+      .lead { margin: 0 0 32px; font-size: 16px; line-height: 24px; }
+      .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+      .grid2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+      .step-n { width: 32px; height: 32px; border-radius: var(--radius-pill); background: var(--grad-135); color: #fff; display: grid; place-items: center; font-weight: 700; margin-bottom: 12px; }
+      .card h3 { margin: 0 0 8px; font-size: 16px; line-height: 24px; color: var(--text-inverse); }
+      .card p { margin: 0; }
+      ul.checks { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 8px; }
+      ul.checks li::before { content: "✓"; color: var(--brand-green); font-weight: 700; margin-right: 8px; }
+      ul.checks li.minus::before { content: "–"; color: var(--text-muted); }
+
+      .price { font-size: 44px; line-height: 52px; font-weight: 700; color: #fff; margin: 8px 0 4px; }
+      .price small { font-size: 14px; font-weight: 400; color: var(--text-muted); }
+      .plan { display: flex; flex-direction: column; gap: 4px; }
+      .plan .btn { margin-top: 20px; align-self: flex-start; }
+      .plan.featured { border: 1px solid transparent; background: linear-gradient(var(--bg-page), var(--bg-page)) padding-box, var(--grad-135) border-box; }
+      .tag { align-self: flex-start; font-size: 12px; line-height: 18px; font-weight: 600; padding: 2px 10px; border-radius: var(--radius-pill); background: var(--bg-code); }
+
+      details { border-bottom: 1px solid var(--border-subtle); padding: 16px 0; }
+      summary { cursor: pointer; font-weight: 600; color: var(--text-inverse); }
+      details p { margin: 8px 0 0; }
+
+      footer { border-top: 1px solid var(--border-subtle); padding: 24px 0 40px; font-size: 12px; line-height: 18px; }
+      footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+
+      @media (max-width: 860px) {
+        .hero, .grid3, .grid2 { grid-template-columns: 1fr; }
+        .hero h1 { font-size: 38px; line-height: 44px; }
+        nav .links a:not(.btn) { display: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="wrap">
+      <nav>
+        <a class="logo" href="#"><img src="../icons/icon-128.png" alt="" />Youbefy</a>
+        <div class="links">
+          <a href="#how">How it works</a>
+          <a href="#modes">Modes</a>
+          <a href="#pricing">Pricing</a>
+          <a href="#faq">FAQ</a>
+          <a class="btn btn-primary" href="#download">Download</a>
+        </div>
+      </nav>
+    </header>
+
+    <main>
+      <div class="wrap hero">
+        <div>
+          <h1>Your Spotify playlists, <span>now on YouTube.</span></h1>
+          <p class="muted">Youbefy adds a <b>Convert to YouTube</b> button to any Spotify playlist page. One click reads the tracklist, finds each song on YouTube and opens it as a playlist.</p>
+          <div class="cta" id="download">
+            <!-- Replace with the Chrome Web Store listing once published. -->
+            <a class="btn btn-primary" href="#">Add to Chrome — it's free</a>
+            <a class="btn btn-secondary" href="#pricing">Buy Supporter</a>
+          </div>
+          <p class="note muted">Chrome, Edge, Brave and other Chromium browsers · v0.3.0 · No account needed in free mode</p>
+        </div>
+        <div class="preview" aria-hidden="true">
+          <div class="head"><div class="cover"></div><div><div class="muted">Public Playlist</div><div class="title">Today's Top Hits</div></div></div>
+          <div class="row"><span>1</span><i></i><span><b>Golden Hour Drive</b>Nova Reyes</span></div>
+          <div class="row"><span>2</span><i></i><span><b>Paper Planets</b>The Lumen Kids</span></div>
+          <div class="row"><span>3</span><i></i><span><b>Neon Hearts</b>Kai Mendes</span></div>
+          <div class="overlay">(31/50) Neon Hearts Kai Mendes<div class="bar"><span></span></div></div>
+          <span class="btn btn-primary">Convert to YouTube</span>
+        </div>
+      </div>
+
+      <section id="how">
+        <div class="wrap">
+          <h2>How it works</h2>
+          <p class="lead muted">Three steps, no copy-pasting track names.</p>
+          <div class="grid3">
+            <div class="card"><div class="step-n">1</div><h3>Open a playlist</h3><p class="muted">Go to any <code>open.spotify.com/playlist/…</code> page in Chrome.</p></div>
+            <div class="card"><div class="step-n">2</div><h3>Click Convert to YouTube</h3><p class="muted">Youbefy scrolls the whole tracklist and searches YouTube for every song, with live progress.</p></div>
+            <div class="card"><div class="step-n">3</div><h3>Press play</h3><p class="muted">Your playlist opens on YouTube, in order, ready to loop or shuffle.</p></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="modes">
+        <div class="wrap">
+          <h2>Two ways to convert</h2>
+          <p class="lead muted">Pick one in the extension's options page — you can switch any time.</p>
+          <div class="grid2">
+            <div class="card">
+              <span class="tag">Default</span>
+              <h3 style="margin-top:12px">Free mode</h3>
+              <p class="muted">Zero setup. Opens a temporary YouTube playlist.</p>
+              <ul class="checks">
+                <li>No Google account, no API keys</li>
+                <li>Plays in order with loop and shuffle</li>
+                <li class="minus">Temporary — not saved to your channel</li>
+                <li class="minus">50 videos per tab (longer playlists open in parts)</li>
+              </ul>
+            </div>
+            <div class="card">
+              <span class="tag">Advanced</span>
+              <h3 style="margin-top:12px">YouTube account mode</h3>
+              <p class="muted">Saves a real playlist to your YouTube channel.</p>
+              <ul class="checks">
+                <li>Named playlist: private, unlisted or public</li>
+                <li>No length limit beyond your daily quota</li>
+                <li>Uses Google's free API quota — no billing account</li>
+                <li class="minus">Needs your own Google OAuth Client ID (setup guide included)</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="pricing">
+        <div class="wrap">
+          <h2>Pricing</h2>
+          <p class="lead muted">Youbefy is free. Supporter is a one-time thank-you that keeps it maintained.</p>
+          <div class="grid2">
+            <div class="card plan">
+              <h3>Free</h3>
+              <div class="price">$0</div>
+              <p class="muted">Everything Youbefy does, forever.</p>
+              <ul class="checks"><li>Free mode and YouTube account mode</li><li>Unlimited conversions</li><li>Updates when Spotify or YouTube change</li></ul>
+              <a class="btn btn-secondary" href="#download">Download</a>
+            </div>
+            <div class="card plan featured">
+              <span class="tag">One-time</span>
+              <h3>Supporter</h3>
+              <!-- Placeholder price and checkout link: set before publishing. -->
+              <div class="price">$4.99 <small>once</small></div>
+              <p class="muted">Same extension — your purchase funds fixes and new features.</p>
+              <ul class="checks"><li>Everything in Free</li><li>Priority on bug reports</li><li>Our thanks, in the changelog</li></ul>
+              <a class="btn btn-primary" href="#">Buy Supporter</a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="faq">
+        <div class="wrap">
+          <h2>FAQ</h2>
+          <details><summary>Do I need a Spotify Premium or Google account?</summary><p class="muted">No. You only need to be able to open the playlist on open.spotify.com. Free mode needs no Google account at all.</p></details>
+          <details><summary>Why is my free-mode playlist split into several tabs?</summary><p class="muted">YouTube keeps at most 50 videos in a temporary playlist, so longer playlists open in parts of 50.</p></details>
+          <details><summary>Will it always find the right video?</summary><p class="muted">It picks YouTube's top result for "title artist". Most tracks match; the summary tells you how many could not be found.</p></details>
+          <details><summary>Does Youbefy collect my data?</summary><p class="muted">No. There is no Youbefy server — everything runs in your browser, and settings stay in Chrome's storage.</p></details>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="wrap">
+        <span class="muted">© 2026 Youbefy</span>
+        <span class="muted">Not affiliated with Spotify or YouTube. Spotify and YouTube are trademarks of their respective owners.</span>
+      </div>
+    </footer>
+
+  </body>
+</html>
