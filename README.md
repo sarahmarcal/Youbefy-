@@ -8,7 +8,7 @@ with no setup at all (**free mode**, the default) or a real playlist on your
 YouTube account (**API mode**).
 
 ---
-
+<!--
 ## Setup
 
 ### Free mode (no Google Cloud)
@@ -83,7 +83,7 @@ Chrome reads the copy, not this directory. The pinned key means the mirrored
 copy keeps the same extension ID, so the OAuth registration survives.
 
 
-<!--
+
 ### OAuth troubleshooting
 
 Two failures cost real time during first setup, both with misleading messages:
