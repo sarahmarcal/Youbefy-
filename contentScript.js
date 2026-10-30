@@ -82,8 +82,16 @@
     if (btn) btn.disabled = state;
   }
 
+  // Reloading the extension orphans this copy of the script: chrome.runtime is
+  // gone until the Spotify page itself is reloaded.
+  const STALE_MSG = "Youbefy was updated - reload this page (F5) to use it.";
+  function extensionAlive() {
+    return Boolean(globalThis.chrome?.runtime?.id);
+  }
+
   function signIn() {
     showOverlay();
+    if (!extensionAlive()) return updateOverlay(0, STALE_MSG);
     updateOverlay(0, "Signing in with Google...");
     chrome.runtime.sendMessage({ type: "ENSURE_AUTH" }, (resp) => {
       if (resp?.ok) {
@@ -100,6 +108,7 @@
   // A silent pass is expected to fail before the first consent - that is not an
   // error worth surfacing, it just means we show the sign-in button.
   function tryAutoLogin() {
+    if (!extensionAlive()) return;
     chrome.runtime.sendMessage({ type: "ENSURE_AUTH", silent: true }, (resp) => {
       void chrome.runtime.lastError; // swallow "no receiving end" on reload
       if (resp?.ok) {
@@ -264,8 +273,9 @@
 
   async function onConvert() {
     if (busy) return;
-    setBusy(true);
     showOverlay();
+    if (!extensionAlive()) return updateOverlay(0, STALE_MSG);
+    setBusy(true);
     updateOverlay(0, "Loading tracks...");
 
     try {
@@ -280,6 +290,8 @@
         return;
       }
 
+      // Scrolling takes a while; the extension may have been reloaded meanwhile.
+      if (!extensionAlive()) throw new Error(STALE_MSG);
       updateOverlay(0, `Found ${tracks.length} tracks. Starting...`);
       chrome.runtime.sendMessage(
         { type: "CONVERT_PLAYLIST", playlistName: getPlaylistName(), tracks },
@@ -289,7 +301,8 @@
         }
       );
     } catch (err) {
-      updateOverlay(0, `Failed to read tracks: ${err?.message || err}`);
+      const text = err?.message || String(err);
+      updateOverlay(0, text === STALE_MSG ? text : `Failed to read tracks: ${text}`);
       setTimeout(hideOverlay, 4000);
       setBusy(false);
     }

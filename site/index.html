@@ -90,6 +90,10 @@
       .plan.featured { border: 1px solid transparent; background: linear-gradient(var(--bg-page), var(--bg-page)) padding-box, var(--grad-135) border-box; }
       .tag { align-self: flex-start; font-size: 12px; line-height: 18px; font-weight: 600; padding: 2px 10px; border-radius: var(--radius-pill); background: var(--bg-code); }
 
+      .beta { display: flex; gap: 12px; align-items: center; padding: 12px 16px; border-radius: var(--radius-lg); background: var(--bg-surface); border: 1px solid var(--border-strong); }
+      .beta .tag { flex-shrink: 0; background: var(--grad-135); color: var(--text-inverse); }
+      .beta p { margin: 0; }
+
       details { border-bottom: 1px solid var(--border-subtle); padding: 16px 0; }
       summary { cursor: pointer; font-weight: 600; color: var(--text-inverse); }
       details p { margin: 8px 0 0; }
@@ -117,6 +121,13 @@
         </div>
       </nav>
     </header>
+
+    <div class="wrap">
+      <div class="beta" role="note">
+        <span class="tag">Beta</span>
+        <p class="muted">Youbefy is in testing. Free mode currently converts <b>up to about 13 tracks per run</b> before YouTube pauses searches — run it again later to continue (found tracks are remembered), or use YouTube account mode for full playlists.</p>
+      </div>
+    </div>
 
     <main>
       <div class="wrap hero">
@@ -164,6 +175,7 @@
               <ul class="checks">
                 <li>No Google account, no API keys</li>
                 <li>Plays in order with loop and shuffle</li>
+                <li class="minus">Beta: about 13 tracks per run for now</li>
                 <li class="minus">Temporary — not saved to your channel</li>
                 <li class="minus">50 videos per tab (longer playlists open in parts)</li>
               </ul>
@@ -213,6 +225,7 @@
           <h2>FAQ</h2>
           <details><summary>Do I need a Spotify Premium or Google account?</summary><p class="muted">No. You only need to be able to open the playlist on open.spotify.com. Free mode needs no Google account at all.</p></details>
           <details><summary>Why is my free-mode playlist split into several tabs?</summary><p class="muted">YouTube keeps at most 50 videos in a temporary playlist, so longer playlists open in parts of 50.</p></details>
+          <details><summary>Why did free mode stop after about 13 tracks?</summary><p class="muted">Youbefy is in beta. After a burst of searches YouTube asks for a bot check, and Youbefy stops instead of pushing through it. It opens what it found so far and remembers those tracks, so running it again later picks up where it left off. YouTube account mode converts full playlists.</p></details>
           <details><summary>Will it always find the right video?</summary><p class="muted">It picks YouTube's top result for "title artist". Most tracks match; the summary tells you how many could not be found.</p></details>
           <details><summary>Does Youbefy collect my data?</summary><p class="muted">No. There is no Youbefy server — everything runs in your browser, and settings stay in Chrome's storage.</p></details>
         </div>

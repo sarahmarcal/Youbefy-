@@ -8,7 +8,11 @@
 $src = $PSScriptRoot
 $dst = "C:\Youbefy"
 
-robocopy $src $dst /MIR /XD .git /XF sync-to-test.ps1 /NFL /NDL /NJH /NJS /NP | Out-Null
+# The private key stays out of the copy: Chrome warns when an unpacked
+# extension contains one, and the manifest's `key` already pins the ID.
+robocopy $src $dst /MIR /XD .git /XF sync-to-test.ps1 youbefy-key.pem /NFL /NDL /NJH /NJS /NP | Out-Null
+# /MIR leaves excluded files in place, so remove a copy left by older syncs.
+Remove-Item (Join-Path $dst "youbefy-key.pem") -Force -ErrorAction SilentlyContinue
 
 if ($LASTEXITCODE -lt 8) {
   Write-Host "Synced $src -> $dst"

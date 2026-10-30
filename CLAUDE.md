@@ -52,8 +52,8 @@ popup-blocked).
   - rows load in pages, so reaching the bottom is not the end: wait and retry
     (three stagnant passes) before stopping.
 - **YouTube throttles bursts**: after ~10 rapid searches it briefly answered
-  with a redirect loop. Free mode spaces scrapes 300 ms and retries once after
-  2 s. Don't try to defeat bot detection (UA spoofing etc.) — that was refused.
+  with a redirect loop (see "Bot check" below). Free mode spaces scrapes 1 s
+  and retries non-redirect failures once after 2 s. Don't try to defeat bot detection (UA spoofing etc.) — that was refused.
 
 ## Testing in Chrome
 
@@ -70,12 +70,14 @@ popup-blocked).
   `open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M` (50 tracks). Confirm the
   overlay's "Found N tracks" matches the playlist length.
 
-## Open issue (2026-10-29)
+## Bot check (found 2026-10-29)
 
-In Chrome, free mode matched only 12/50 tracks while the same queries resolve
-fine from Node/curl. Cause not yet known — waiting on the service-worker
-console output. If YouTube is blocking the extension's scrapes, api mode
-(free quota) is the fallback.
+Free mode matched only 12/50 in Chrome because YouTube redirected the scrapes
+to `google.com/sorry` (CAPTCHA); `fetch` saw only a CORS error. `scrapeVideoId`
+now fetches with `redirect: "manual"` and throws `{ blocked: true }` on any
+redirect. Free mode then stops at once (no retry; partial result, or an error
+if nothing matched). Api mode switches to `search.list` for the rest of the run.
+Scrapes are spaced 1 s apart. Don't try to solve or evade the CAPTCHA.
 
 ## Design (Figma)
 

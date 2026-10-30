@@ -342,6 +342,37 @@ async function offlineTests() {
     assert.deepEqual(watchIds(watch), expected, "watch_videos URL should carry the scraped ids in track order");
     console.log(`        watch_videos tab opened by the ${via}`);
   });
+
+  // 6. Google's bot check (redirect to google.com/sorry) stops free mode
+  await test("offline", "convertPlaylist (free mode): CAPTCHA redirect stops the run, no retry, no miss cached", async () => {
+    const okHtml = (id) => `<script>var ytInitialData = {"videoRenderer":{"videoId":"${id}"}};</script>`;
+    const sorry = () => new Response(null, { status: 302, headers: { location: "https://www.google.com/sorry/index" } });
+    const tracks = [
+      { title: "One", artist: "A" },
+      { title: "Two", artist: "B" },
+      { title: "Three", artist: "C" }
+    ];
+
+    // First track resolves, second hits the CAPTCHA: partial result, stop there.
+    let n = 0;
+    const partial = loadBackground({
+      sync: { mode: "free" },
+      fetch: async () => (n++ === 0 ? new Response(okHtml("aaaaaaaaaaa"), { status: 200 }) : sorry())
+    });
+    const result = plain(await partial.ctx.convertPlaylist({ tracks }, 1));
+    const scrapes = partial.calls.fetch.filter((u) => u.startsWith("https://www.youtube.com/results"));
+    assert.equal(scrapes.length, 2, `expected 2 scrapes (no retry, no third track), got ${scrapes.length}`);
+    assert.equal(result.added, 1);
+    assert.match(result.summary, /bot check/i);
+    const cache = partial.chrome.storage.local.data.videoIdCache;
+    assert.equal(cache["one a"], "aaaaaaaaaaa");
+    assert.equal(cache["two b"], undefined, "a blocked lookup must not be cached as a miss");
+
+    // Blocked from the start: nothing to open, so the run fails with the hint.
+    const none = loadBackground({ sync: { mode: "free" }, fetch: async () => sorry() });
+    await assert.rejects(none.ctx.convertPlaylist({ tracks }, 1), /bot check/i);
+    assert.equal(none.calls.fetch.length, 1, "should stop after the first blocked scrape");
+  });
 }
 
 // ----------------------------------------------------------------- live

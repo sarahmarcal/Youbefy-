@@ -27,7 +27,8 @@ const CACHE_LIMIT = 2000;
 const MISS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 // Free mode only: pause between network scrapes (not cache hits) so a long
 // playlist does not hammer youtube.com/results and get throttled.
-const SCRAPE_DELAY_MS = 300;
+// 300 ms got the extension sent to Google's CAPTCHA within one 50-track run.
+const SCRAPE_DELAY_MS = 1000;
 const SCRAPE_RETRY_MS = 2000;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -171,14 +172,23 @@ async function addVideoToPlaylist(playlistId, videoId, token) {
 // Free path: parse a video id out of the youtube.com search results page.
 // Costs no API quota. Returns null only for a real results page with no video
 // on it; anything else throws, so callers do not cache a throttle or a consent
-// page as a confirmed no-match. YouTube does throttle bursts: after ~10 quick
-// searches it briefly answered with a redirect loop.
+// page as a confirmed no-match. YouTube does throttle bursts: it redirects
+// flagged traffic to google.com/sorry (a CAPTCHA), which fetch() would only
+// report as a CORS failure. Not following redirects keeps that recognisable;
+// such errors carry `blocked: true` so callers stop searching instead of
+// prolonging the block.
 async function scrapeVideoId(query) {
   const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}&sp=EgIQAQ%253D%253D`;
   const res = await fetch(url, {
     credentials: "omit",
+    redirect: "manual",
     headers: { "Accept-Language": "en-US,en;q=0.9" }
   });
+  if (res.type === "opaqueredirect" || (res.status >= 300 && res.status < 400)) {
+    const err = new Error("youtube redirected the search (bot check / CAPTCHA)");
+    err.blocked = true;
+    throw err;
+  }
   if (!res.ok) throw new Error(`youtube results ${res.status}`);
   const html = await res.text();
   if (!html.includes("ytInitialData")) throw new Error("not a youtube results page");
@@ -268,9 +278,10 @@ async function convertPlaylistFree(message, tabId) {
   const videoIds = [];
   let missed = 0;
   let scraped = false;
+  let blocked = false;
 
   try {
-    for (let i = 0; i < limited.length; i++) {
+    for (let i = 0; i < limited.length && !blocked; i++) {
       const t = limited[i];
       const query = `${t.title} ${t.artist}`.trim();
       const key = query.toLowerCase();
@@ -298,6 +309,11 @@ async function convertPlaylistFree(message, tabId) {
             console.warn("[youbefy] lookup failed:", query, err?.message || err);
             videoId = null;
             failed = true;
+            // Retrying or moving on to the next track only extends the block.
+            if (err?.blocked) {
+              blocked = true;
+              break;
+            }
           }
         }
         if (videoId) cache[key] = videoId;
@@ -305,11 +321,15 @@ async function convertPlaylistFree(message, tabId) {
       }
 
       if (videoId) videoIds.push(videoId);
-      else missed++;
+      else if (!blocked) missed++;
     }
   } finally {
     await saveCache(cache);
   }
+
+  const BLOCKED_HINT = "YouTube asked for a bot check (CAPTCHA). Matches so far are cached - " +
+    "wait a while and run again, or switch to API mode in the extension options.";
+  if (blocked && !videoIds.length) throw new Error(BLOCKED_HINT);
 
   const urls = buildWatchVideosUrls(videoIds);
   // Two tracks can resolve to the same video; watch_videos lists it once, so
@@ -317,9 +337,11 @@ async function convertPlaylistFree(message, tabId) {
   const added = new Set(videoIds).size;
   const parts = urls.length > 1 ? `, split into ${urls.length} parts (YouTube allows 50 per list)` : "";
   const misses = missed ? ` Could not match ${missed}.` : "";
-  const summary = added
-    ? `Done - ${added} videos in a temporary YouTube playlist${parts}.${misses}`
-    : `Done - could not match any of ${limited.length} tracks.`;
+  const summary = blocked
+    ? `Stopped early - ${added} videos in a temporary YouTube playlist${parts}. ${BLOCKED_HINT}`
+    : added
+      ? `Done - ${added} videos in a temporary YouTube playlist${parts}.${misses}`
+      : `Done - could not match any of ${limited.length} tracks.`;
   sendProgress(tabId, 100, summary);
   return { urls, added, missed, summary };
 }
@@ -345,6 +367,8 @@ async function convertPlaylistViaApi(message, tabId) {
   const cache = await loadCache();
   let added = 0;
   let missed = 0;
+  // Once YouTube shows the bot check, stop scraping and use the API directly.
+  let scrapeBlocked = false;
 
   // Everything resolved so far is worth keeping even if the run dies partway -
   // a quota failure is exactly when the next attempt most needs the cache.
@@ -364,11 +388,14 @@ async function convertPlaylistViaApi(message, tabId) {
         // A lookup that threw is a transient failure, not a confirmed no-match,
         // so it must not be recorded as a miss.
         let failed = false;
-        try {
-          videoId = await scrapeVideoId(query);
-        } catch {
-          videoId = null;
-          failed = true;
+        videoId = null;
+        if (!scrapeBlocked) {
+          try {
+            videoId = await scrapeVideoId(query);
+          } catch (err) {
+            if (err?.blocked) scrapeBlocked = true;
+            failed = true;
+          }
         }
         if (!videoId) {
           // Only spend quota when the free path came up empty.
