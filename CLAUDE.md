@@ -62,6 +62,12 @@ popup-blocked).
   `C:\Youbefy`), then **Reload** the Youbefy card. The `key` in `manifest.json`
   pins the ID `khkddicldodofidklleknlgokhkchbei`, which the OAuth redirect URI
   depends on — never touch it. `youbefy-key.pem` is gitignored; never commit it.
+  The sync script excludes it too (Chrome warns about a key file in the folder).
+- After a Reload, an already-open Spotify tab keeps the orphaned old content
+  script (`chrome.runtime` is undefined → "Cannot read properties of undefined
+  (reading 'sendMessage')"). The script now shows "reload this page" instead;
+  test in a **new tab**. Old entries on the card's Errors page persist until
+  "Clear all" — compare the `q=` token before treating a pasted error as new.
 - Browser automation (claude-in-chrome) cannot open `chrome://extensions`, so
   the user has to press Reload. It also cannot see the service-worker console —
   ask the user to open it ("service worker" link on the card); free-mode lookup
@@ -69,6 +75,9 @@ popup-blocked).
 - Good test playlist: Today's Top Hits,
   `open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M` (50 tracks). Confirm the
   overlay's "Found N tracks" matches the playlist length.
+- claude-in-chrome cannot open `file://` URLs. To view the site, run
+  `python -m http.server 8765 --bind 127.0.0.1 --directory C:/Youbefy` (after a
+  sync) and open `http://127.0.0.1:8765/site/index.html`.
 
 ## Bot check (found 2026-10-29)
 
@@ -78,6 +87,11 @@ now fetches with `redirect: "manual"` and throws `{ blocked: true }` on any
 redirect. Free mode then stops at once (no retry; partial result, or an error
 if nothing matched). Api mode switches to `search.list` for the rest of the run.
 Scrapes are spaced 1 s apart. Don't try to solve or evade the CAPTCHA.
+
+Verified in Chrome on the 50-track test playlist: blocked at track 14, opened
+13 videos with the "Stopped early … bot check" summary. The site's beta notice
+("about 13 tracks per run") is based on that one run — revisit it if the
+pacing or behaviour changes.
 
 ## Design (Figma)
 
@@ -108,6 +122,9 @@ z-index), hiding the end of the message. Not fixed yet.
 - `main`'s site must describe only what the extension does today: free,
   unlimited conversions, plus an optional one-time $4.99 **Supporter** tip
   (placeholder price). All checkout/download links are `#` placeholders.
+- While in beta the site states the free-mode limit in three places: the
+  banner under the nav, the Free mode card and an FAQ entry. Keep them in sync
+  and remove all three once the limit is gone.
 - A planned per-playlist model (Free 1/day, Unlimited $4.99, "buy me a coffee"
   $1 = +1 bonus playlist) lives on the local branch `landing-page`. Keep it off
   `main` until the extension enforces it — that needs a backend
